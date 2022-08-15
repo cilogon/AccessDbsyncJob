@@ -753,10 +753,10 @@ class AccessDbsyncJob extends CoJobBackend {
 
       $this->CoJob->Co->CoPerson->CoPersonRole->Behaviors->unload('Normalization');
 
-      $profileOrg = $normalizedData['CoPersonRole']['o'];
+      $profileOrgNormalized = $normalizedData['CoPersonRole']['o'];
 
       if(($role['affiliation'] == AffiliationEnum::Affiliate) &&
-         ($role['o'] == $profileOrg)) {
+         (($role['o'] == $profileOrg) || ($role['o'] == $profileOrgNormalized))) {
         $synchronized = true;
         break;
       }
