@@ -733,9 +733,32 @@ class AccessDbsyncJob extends CoJobBackend {
     // and Organization as determined by the profile. 
     $synchronized = false;
     foreach($coPerson['CoPersonRole'] as $role) {
+      if(empty($profile['organizationName'])) {
+          $profileOrg = "placeholder";
+      } else {
+          $profileOrg = $profile['organizationName'];
+      }
+
+      // Before comparing the organization saved as a field for the CoPersonRole
+      // with the value from the ACCESS DB profile, we need to perform the same
+      // normalization on the value from the ACCESS DB profile that the COmanage Registry
+      // DefaultNormalizer plugin does.
+
+      $data = array();
+      $data['CoPersonRole']['o'] = $profileOrg;
+
+      $this->CoJob->Co->CoPerson->CoPersonRole->Behaviors->load('Normalization');
+
+      $normalizedData = $this->CoJob->Co->CoPerson->CoPersonRole->normalize($data, 2);
+
+      $this->CoJob->Co->CoPerson->CoPersonRole->Behaviors->unload('Normalization');
+
+      $profileOrg = $normalizedData['CoPersonRole']['o'];
+
       if(($role['affiliation'] == AffiliationEnum::Affiliate) &&
-         ($role['o'] == ((empty($profile['organizationName']) ? "placeholder" : $profile['organizationName'])))) {
+         ($role['o'] == $profileOrg)) {
         $synchronized = true;
+        break;
       }
     }
 
