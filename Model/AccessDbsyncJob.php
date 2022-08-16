@@ -744,16 +744,7 @@ class AccessDbsyncJob extends CoJobBackend {
       // normalization on the value from the ACCESS DB profile that the COmanage Registry
       // DefaultNormalizer plugin does.
 
-      $data = array();
-      $data['CoPersonRole']['o'] = $profileOrg;
-
-      $this->CoJob->Co->CoPerson->CoPersonRole->Behaviors->load('Normalization');
-
-      $normalizedData = $this->CoJob->Co->CoPerson->CoPersonRole->normalize($data, 2);
-
-      $this->CoJob->Co->CoPerson->CoPersonRole->Behaviors->unload('Normalization');
-
-      $profileOrgNormalized = $normalizedData['CoPersonRole']['o'];
+      $profileOrgNormalized = mb_convert_case($profileOrg, MB_CASE_TITLE);
 
       if(($role['affiliation'] == AffiliationEnum::Affiliate) &&
          (($role['o'] == $profileOrg) || ($role['o'] == $profileOrgNormalized))) {
