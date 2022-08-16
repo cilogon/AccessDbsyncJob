@@ -141,15 +141,45 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['Identifier']['status'] = SuspendableStatusEnum::Active;
     $data['Identifier']['co_person_id'] = $coPersonId;
 
+    // Dynamically disable the Identifier Validator for this CO
+    // for the ACCESS ID.
+    $args = array();
+    $args['conditions']['CoIdentifierValidator.co_id'] = $this->coId;
+    $args['conditions']['CoIdentifierValidator.status'] = SuspendableStatusEnum::Active;
+    $args['contain'][] = 'CoExtendedType';
+
+    $validators = $this->CoJob->Co->CoIdentifierValidator->find('all', $args);
+
+    if(!empty($validators)) {
+      foreach($validators as $v) {
+        if($v['CoExtendedType']['name'] == 'accessid') {
+          $accessIdValidatorId = $v['CoIdentifierValidator']['id'];
+          $this->CoJob->Co->CoIdentifierValidator->id = $accessIdValidatorId;
+          $this->CoJob->Co->CoIdentifierValidator->saveField('status', SuspendableStatusEnum::Suspended);
+          break;
+        }
+      }
+    }
+
     $args = array();
     $args['validate'] = false;
 
-    if(!$this->CoJob->Co->CoPerson->Identifier->save($data, $args)) {
+    try {
+      $success = $this->CoJob->Co->CoPerson->Identifier->save($data, $args);
+      if(!$success) {
+        throw new RuntimeException();
+      }
+    } catch (Exception $e) {
       $msg = "ERROR could not create Identifier for CoPerson: ";
       $msg = $msg . "ACCESS ID $accessId";
       $this->log($msg);
       $dataSource->rollback();
       throw new RuntimeException($msg);
+    } finally {
+      if(!empty($accessIdValidatorId)) {
+        $this->CoJob->Co->CoIdentifierValidator->id = $accessIdValidatorId;
+        $this->CoJob->Co->CoIdentifierValidator->saveField('status', SuspendableStatusEnum::Active);
+      }
     }
 
     // Attach a Name to the CoPerson record.
