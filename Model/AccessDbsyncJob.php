@@ -18,6 +18,18 @@ class AccessDbsyncJob extends CoJobBackend {
   // Current CO ID
   private $coId;
 
+  // Paging offset
+  private $pagingOffset = null;
+
+  // Paging limit
+  private $pagingLimit = null;
+
+  // Process only one page of profiles
+  private $onePageOnly = null;
+
+  // Synchronize this single ACCESS ID
+  private $requestedAccessId = null;
+
   /**
    * Obtain the ACCESS ID from the User Database profile. Throw
    * an exception if the ACCESS ID cannot be found from the profile.
@@ -118,7 +130,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['CoPerson']['co_id'] = $this->coId;
     $data['CoPerson']['status'] = StatusEnum::Active;
 
-    if(!$this->CoJob->Co->CoPerson->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->save($data, $args)) {
       $msg = "ERROR could not create CoPerson: ";
       $msg = $msg . "ACCESS ID $accessId";
       $msg = $msg . "ERROR CoPerson validation errors: ";
@@ -163,6 +178,7 @@ class AccessDbsyncJob extends CoJobBackend {
 
     $args = array();
     $args['validate'] = false;
+    $args['provision'] = false;
 
     try {
       $success = $this->CoJob->Co->CoPerson->Identifier->save($data, $args);
@@ -191,7 +207,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['Name']['primary_name'] = true;
     $data['Name']['co_person_id'] = $coPersonId;
 
-    if(!$this->CoJob->Co->CoPerson->Name->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->Name->save($data, $args)) {
       $msg = "ERROR could not create Name for CoPerson: ";
       $msg = $msg . "ACCESS ID $accessId ";
       $msg = $msg . "ERROR Name validation errors: ";
@@ -214,6 +233,7 @@ class AccessDbsyncJob extends CoJobBackend {
 
     $options = array();
     $options['trustVerified'] = true;
+    $options['provision'] = false;
 
     if(!$this->CoJob->Co->CoPerson->EmailAddress->save($data, $options)) {
       $msg = "ERROR could not create EmailAddress for CoPerson: ";
@@ -235,7 +255,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['CoPersonRole']['affiliation'] = AffiliationEnum::Affiliate;
     $data['CoPersonRole']['o'] = (empty($profile['organizationName'])) ? "placeholder" : $profile['organizationName'];
 
-    if(!$this->CoJob->Co->CoPerson->CoPersonRole->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->CoPersonRole->save($data, $args)) {
       $msg = "ERROR could not create CoPersonRole for CoPerson: ";
       $msg = $msg . "ACCESS ID $accessId ";
       $msg = $msg . "ERROR CoPersonRole validation errors: ";
@@ -252,7 +275,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['OrgIdentity'] = array();
     $data['OrgIdentity']['co_id'] = $this->coId;
 
-    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->OrgIdentity->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->OrgIdentity->save($data, $args)) {
       $msg = "Could not create OrgIdentity for AccessID $accessId";
       $this->log($msg);
       $dataSource->rollback();
@@ -270,7 +296,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['CoOrgIdentityLink']['co_person_id'] = $coPersonId;
     $data['CoOrgIdentityLink']['org_identity_id'] = $orgIdentityId;
 
-    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->save($data, $args)) {
       $msg = "ERROR could not link CoPerson and OrgIdentity ";
       $msg = $msg . "ACCESS ID $accessId ";
       $msg = $msg . "ERROR CoOrgIdentityLink validation errors: ";
@@ -289,7 +318,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['Name']['primary_name'] = true;
     $data['Name']['org_identity_id'] = $orgIdentityId;
 
-    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->OrgIdentity->Name->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->OrgIdentity->Name->save($data, $args)) {
       $msg = "ERROR could not create Name for OrgIdentity: ";
       $msg = $msg . "ACCESS ID $accessId ";
       $msg = $msg . "ERROR Name validation errors: ";
@@ -311,7 +343,10 @@ class AccessDbsyncJob extends CoJobBackend {
     $data['Identifier']['login'] = true;
     $data['Identifier']['org_identity_id'] = $orgIdentityId;
 
-    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->OrgIdentity->Identifier->save($data)) {
+    $args = array();
+    $args['provision'] = false;
+
+    if(!$this->CoJob->Co->CoPerson->CoOrgIdentityLink->OrgIdentity->Identifier->save($data, $args)) {
       $msg = "ERROR could not create Identifier for OrgIdentity: ";
       $msg = $msg . "ACCESS ID $accessId ";
       $msg = $msg . "ERROR Identifier validation errors: ";
@@ -323,6 +358,19 @@ class AccessDbsyncJob extends CoJobBackend {
 
     // Commit the transaction.
     $dataSource->commit();
+
+    // Force Identifier Assignment.
+    $this->CoJob->Co->CoPerson->Identifier->assign('CoPerson', $coPersonId, null);
+
+    // Now force manual provisioning.
+    try {
+      $this->CoJob->Co->CoPerson->manualProvision(null, $coPersonId, null, ProvisioningActionEnum::CoPersonAdded);
+    } catch (Exception $e) {
+      $msg = "Provisioning for CoPerson with ID $coPersonId threw exception: ";
+      $msg = $msg . $e->getMessage();
+      $this->log($msg);
+      throw new RuntimeException($msg);
+    }
 
     $msg = "Created CoPerson with ID $coPersonId for ACCESS ID $accessId";
     $this->log($msg);
@@ -344,6 +392,22 @@ class AccessDbsyncJob extends CoJobBackend {
     $this->CoJob = $CoJob;
     $this->coId = $coId;
 
+    if(array_key_exists('limit', $params)) {
+      $this->pagingLimit = $params['limit'];
+    }
+
+    if(array_key_exists('offset', $params)) {
+      $this->pagingOffset = $params['offset'];
+    }
+
+    if(array_key_exists('one_only', $params)) {
+      $this->onePageOnly = $params['one_only'];
+    }
+
+    if(array_key_exists('access_id', $params)) {
+      $this->requestedAccessId = $params['access_id'];
+    }
+
     // Bootstrap if so configured.
     $bootstrap = Configure::read('AccessDbsyncJob.bootstrap');
     if($bootstrap) {
@@ -351,8 +415,11 @@ class AccessDbsyncJob extends CoJobBackend {
       $this->createAccessIdExtendedType();
     }
 
-    // Synchronize CO Person records with User Database.
-    $result = $this->synchronizeAllProfiles();
+    if(!empty($this->requestedAccessId)) {
+      $result = $this->synchronizeOneAccessId();
+    } else {
+      $result = $this->synchronizeAllProfiles();
+    }
 
     $synchronized = $result['synchronized'];
     $failed = $result['failed'];
@@ -448,8 +515,28 @@ class AccessDbsyncJob extends CoJobBackend {
    * @return Array Array of supported parameters.
    */
   public function parameterFormat() {
-
-    $params = array();
+    $params = array(
+      'access_id' => array(
+        'help' => _txt('pl.accessdbsyncjob.job.accessdbsync.access_id'),
+        'type' => 'string',
+        'required' => false
+      ),
+      'limit' => array(
+        'help'     => _txt('pl.accessdbsyncjob.job.accessdbsync.limit'),
+        'type'     => 'int',
+        'required' => false
+      ),
+      'offset' => array(
+        'help'     => _txt('pl.accessdbsyncjob.job.accessdbsync.offset'),
+        'type'     => 'int',
+        'required' => false 
+      ),
+      'one_only' => array(
+        'help' => _txt('pl.accessdbsyncjob.job.accessdbsync.one_only'),
+        'type' => 'bool',
+        'required' => false
+      )
+    );
 
     return $params;
   }
@@ -467,11 +554,21 @@ class AccessDbsyncJob extends CoJobBackend {
     $failed = 0;
     $ret = array();
 
-    // Page ACCESS User Database profiles starting at offset 0 and 
-    // continue until no further records are returned.
+    // Page ACCESS User Database profiles and continue until done.
     $pagingDone = false;
-    $offset = Configure::read('AccessDbsyncJob.db.profile.page.initial.offset');
-    $limit = Configure::read('AccessDbsyncJob.db.profile.page.limit');
+
+    if(empty($this->pagingOffset)) {
+      $offset = Configure::read('AccessDbsyncJob.db.profile.page.initial.offset');
+    } else {
+      $offset = $this->pagingOffset;
+    }
+
+    if(empty($this->pagingLimit)) {
+      $limit = Configure::read('AccessDbsyncJob.db.profile.page.limit');
+    } else {
+      $limit = $this->pagingLimit;
+    }
+
     $maxSleepTime = Configure::read('AccessDbsyncJob.db.profile.page.max.sleep.time.seconds');
     $sleepTime = 1;
 
@@ -603,7 +700,11 @@ class AccessDbsyncJob extends CoJobBackend {
         $offset += $limit;
         
         // Flag used for development and testing.
-        $onePageOnly = Configure::read('AccessDbsyncJob.debug.one.page.only');
+        if($this->onePageOnly === null) {
+          $onePageOnly = Configure::read('AccessDbsyncJob.debug.one.page.only');
+        } else {
+          $onePageOnly = $this->onePageOnly;
+        }
 
         if($onePageOnly) {
           $pagingDone = true;
@@ -615,6 +716,87 @@ class AccessDbsyncJob extends CoJobBackend {
 
     $ret['synchronized'] = $synchronized;
     $ret['failed'] = $failed;
+    $ret['status'] = JobStatusEnum::Complete;
+
+    return $ret;
+  }
+
+  /** 
+   * Synchronize the profile for one ACCESS ID with an existing 
+   * CO Person record or create a CO Person record if one does
+   * not yet exist.
+   *
+   * @return array of number synchronized, number of failures, and JobStatusEnum
+   */
+
+  private function synchronizeOneAccessId() {
+    $ret['synchronized'] = 0;
+    $ret['failed'] = 1;
+    $ret['status'] = JobStatusEnum::Failed;
+
+    $requestedAccessId = $this->requestedAccessId;
+
+    // We record a job history record based on the ACCESS ID.
+    $jobHistoryRecordKey = $requestedAccessId;
+
+    // Configure curl libraries to query ACCESS Database API.
+    $urlBase = Configure::read('AccessDbsyncJob.db.profile.page.url.base');
+    $url = $urlBase . '/people/' . $requestedAccessId;
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_URL, $url);
+
+    // Include headers necessary for authentication.
+    $headers = array();
+    $headers[] = 'XA-REQUESTER: ' . Configure::read('AccessDbsyncJob.db.api.requester');
+    $headers[] = 'XA-API-KEY: ' .  Configure::read('AccessDbsyncJob.db.api.key');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    // Return the payload from the curl_exec call below.
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+    // Make the query and get the response and return code.
+    $response = curl_exec($ch);
+    $curlReturnCode = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+    curl_close($ch);
+
+    if($response === false) {
+      $jobHistoryComment = "Unable to query ACCESS User Database profile page endpoint";
+      $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, null, null, JobStatusEnum::Failed);
+      $this->log($jobHistoryComment);
+      return $ret;
+    }
+
+    if($curlReturnCode != 200) {
+      $jobHistoryComment = "Query to ACCESS User Database profile endpoint returned code $curlReturnCode";
+      $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, null, null, JobStatusEnum::Failed);
+      $this->log($jobHistoryComment);
+      return $ret;
+    }
+
+    try {
+      $profile = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+    } catch (Exception $e) {
+      $jobHistoryComment = "Error decoding JSON from User Database: " . $e->getMessage();
+      $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, null, null, JobStatusEnum::Failed);
+      $this->log($jobHistoryComment);
+      return $ret;
+    }
+
+    try {
+      $this->synchronizeOneProfile($profile);
+    } catch (Exception $e) {
+      $jobHistoryComment = "Error synchronizing profile for ACCESS ID $requestedAccessId: " . $e->getMessage();
+      $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, null, null, JobStatusEnum::Failed);
+      $this->log($jobHistoryComment);
+      return $ret;
+    }
+
+    $jobHistoryComment = "Synchronized profile for ACCESS ID $requestedAccessId";
+    $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, null, null, JobStatusEnum::Complete);
+
+    $ret['synchronized'] = 1;
+    $ret['failed'] = 0;
     $ret['status'] = JobStatusEnum::Complete;
 
     return $ret;
