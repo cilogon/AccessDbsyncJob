@@ -128,7 +128,14 @@ class AccessDbsyncJob extends CoJobBackend {
     $data = array();
     $data['CoPerson'] = array();
     $data['CoPerson']['co_id'] = $this->coId;
-    $data['CoPerson']['status'] = StatusEnum::Active;
+
+    if($profile['isSuspended']) {
+      $status = StatusEnum::Suspended;
+    } else {
+      $status = StatusEnum::Active;
+    }
+
+    $data['CoPerson']['status'] = $status;
 
     $args = array();
     $args['provision'] = false;
@@ -145,6 +152,11 @@ class AccessDbsyncJob extends CoJobBackend {
 
     // Record the CoPerson ID for later assignment.
     $coPersonId = $this->CoJob->Co->CoPerson->id;
+
+    if($status != StatusEnum::Active) {
+      $msg = "Created Suspended CO Person with ID $coPersonId";
+      $this->log($msg);
+    }
 
     // Attach an Identifier with value ACCESS ID to the CoPerson.
     $this->CoJob->Co->CoPerson->Identifier->clear();
@@ -842,6 +854,31 @@ class AccessDbsyncJob extends CoJobBackend {
 
   private function synchronizeCoPerson($coPerson, $profile) {
     $coPersonId = $coPerson['CoPerson']['id'];
+
+    // For the purpose of synchronization these status enums are
+    // considered to be the equivalent of isSuspended in the ACCESS DB
+    // so we will not change the status if it is already one of these.
+    $suspendedStatuses = array();
+    $suspendedStatuses[] = StatusEnum::Declined;
+    $suspendedStatuses[] = StatusEnum::Deleted;
+    $suspendedStatuses[] = StatusEnum::Denied;
+    $suspendedStatuses[] = StatusEnum::Duplicate;
+    $suspendedStatuses[] = StatusEnum::Expired;
+    $suspendedStatuses[] = StatusEnum::Locked;
+    $suspendedStatuses[] = StatusEnum::Suspended;
+
+    // Suspend the CO Person record if necessary.
+    if($profile['isSuspended']) {
+      if(!in_array($coPerson['CoPerson']['status'], $suspendedStatuses)) {
+        $this->CoJob->Co->CoPerson->clear();
+        $this->CoJob->Co->CoPerson->id = $coPersonId;
+        if(!$this->CoJob->Co->CoPerson->saveField('status', StatusEnum::Suspended)) {
+          $msg = "ERROR could not Suspend CoPerson $coPersonId: ";
+          $this->log($msg);
+          throw new RuntimeException($msg);
+        }
+      }
+    }
 
     // Find the existing CO Person primary name.
     $primaryName = null;
